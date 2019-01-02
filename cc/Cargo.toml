@@ -1,0 +1,12 @@
+[package]
+name = "cc"
+version = "0.0.1"
+authors = ["DragoonKiller <947426443@qq.com>"]
+edition = "2018"
+
+[[bin]]
+name = "cc"
+
+
+[dependencies]
+regex = "1"
