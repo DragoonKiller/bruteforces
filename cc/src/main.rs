@@ -20,6 +20,8 @@ struct Data
     input : Option<String>,
     output : Option<String>,
     include_dir : Option<String>,
+    hint : Option<bool>,
+    ignore_trash : Option<bool>,
 }
 
 #[derive(Debug)]
@@ -40,6 +42,8 @@ fn Parse(mut args : VecDeque<String>, mut data : &mut Data, state : ParseState)
         {
             "-i" => Parse(args, &mut data, ParseState::SetInclude),
             "-o" => Parse(args, &mut data, ParseState::SetOutput),
+            "-h" => data.hint = Some(false),
+            "-g" => data.ignore_trash = Some(false),
             _ =>
             {
                 if data.input != None { panic!("\ninput file re-defined!\n"); }
@@ -70,6 +74,72 @@ fn Parse(mut args : VecDeque<String>, mut data : &mut Data, state : ParseState)
     }
 }
 
+fn Unfold(
+    filename : &str,            // current open file.
+    incdir : &str,              // include directory.
+    mut predef : &mut Vec<String>,  // already unfolded file names.
+    mut info : &mut Vec<String>,    // currently unfolding file names.
+    hint : bool,                // whether output hints.
+    ignore : bool,              // whether ignore not matched lines in transfering blocks.
+) -> Vec<String>
+{
+    let srcfile = NormPath(filename);
+    if(srcfile == None) { panic!("source file path [{}] invalid!", filename); }
+    
+    info.push(srcfile.unwrap().to_owned());
+    if info.len() > 32 { panic!("recursion too deep! with \n{}", info.join("\n")); }
+    
+    let source = ReadAll(filename);
+    if source == None { panic!("Can not read from file [{}] from \n{}", filename, info.join("\n")); }
+    
+    let re : Regex = Regex::new("^[ ]*#include[ ]*\"(.*)\"").unwrap();
+    let src = source.unwrap().split('\n').map(|x| x.trim_right().to_string()).collect::<Vec<String>>();
+    let mut dst = Vec::new();
+    let mut transfering = false;
+    'nextline: for line in src
+    {
+        match line.as_str()
+        {
+            "/* bruteforces generation begin */" =>
+            {
+                transfering = true;
+            }
+            
+            "/* bruteforces generation end */" =>
+            {
+                transfering = false;
+            }
+            
+            _ =>
+            {
+                if !transfering
+                {
+                    if line.len() != 0 { dst.push(line); }
+                    continue;
+                }
+                
+                for cap in re.captures_iter(&line)
+                {
+                    let incpath = NormPath(incdir);
+                    if incpath == None { panic!("include directroy [{}] invalid!", incdir); }
+                    let incfile = incpath.unwrap() + "/" + &cap[1];
+                    let mut unfolded = Unfold(&incfile, incdir, &mut predef, &mut info, hint, ignore);
+                    if predef.contains(&incfile.to_owned()) { break; }
+                    if hint { dst.push("// bruteforces >>> ".to_owned() + &incfile + " >>>"); }
+                    dst.append(&mut unfolded);
+                    if hint { dst.push("// <<< ".to_owned() + &incfile + " <<< bruteforces"); }
+                    predef.push(incfile);
+                    continue 'nextline; // only take the first capture of this line, if any.
+                }
+                
+                if !ignore { dst.push(line); }
+            }
+        }
+    }
+    info.pop();
+    dst
+}
+
 fn main()
 {
     
@@ -77,6 +147,8 @@ fn main()
         input : None,
         output : None,
         include_dir : None,
+        hint : None,
+        ignore_trash : None,
     };
     
     let mut args : VecDeque<String> = args().map(|x| x.to_string()).collect();
@@ -87,59 +159,18 @@ fn main()
     if data.input == None { panic!("You should specify an input file!"); }
     if data.include_dir == None { data.include_dir = Dir((&data).input.as_ref().unwrap()); }
     if data.include_dir == None { panic!("You must specify an include path while directory of input file is invalid."); }
+    if data.hint == None { data.hint = Some(true); }
+    if data.ignore_trash == None { data.ignore_trash = Some(true); }
     
-    let source = { ReadAll((&data).input.as_ref().unwrap()) };
-    if source == None { panic!("Can not read from file {}", &data.input.unwrap()); }
+    let dst = Unfold(
+        (&data).input.as_ref().unwrap(),
+        (&data).include_dir.as_ref().unwrap(),
+        &mut Vec::new(),
+        &mut Vec::new(),
+        data.hint.unwrap(),
+        data.ignore_trash.unwrap()
+    ).join("\n");
     
-    // println!("{:?}", data);
-    
-    let input = data.input.unwrap();
     let output = data.output.unwrap();
-    let include = data.include_dir.unwrap();
-    let re = Regex::new("#include[ ]*\"(.*)\"").unwrap();
-    let sourceLines = source.unwrap().split('\n').map(|x| x.trim_right().to_string()).collect::<Vec<String>>();
-    let mut dstLines = Vec::new();
-    let mut transfering = false;
-    for line in sourceLines
-    {
-        match line.as_str()
-        {
-            "/* bruteforces generation begin */" =>
-            {
-                transfering = true;
-                dstLines.push("/// >>> bruteforces generated begin.".to_string());
-            }
-            
-            "/* bruteforces generation end */" =>
-            {
-                transfering = false;
-                dstLines.push("/// >>> bruteforces generated end.".to_string());
-            }
-            
-            _ =>
-            {
-                if !transfering
-                {
-                    dstLines.push(line);
-                    continue;
-                }
-                
-                let mut capped = false;
-                for cap in re.captures_iter(&line)
-                {
-                    capped = true;
-                    let incfile = include.to_owned() + "/" + &cap[1];
-                    match ReadAll(&incfile)
-                    {
-                        Some(ref s) => { dstLines.append(&mut s.split('\n').map(|x| x.to_string()).collect::<Vec<String>>()); }
-                        None => { panic!("cannot transfer included file {}", incfile); }
-                    }
-                    break; // only take the first capture.
-                }
-                if !capped { dstLines.push(line); }
-            }
-        }
-    }
-    
-    WriteAll(&output, &dstLines.join("\n"));
+    WriteAll(&output, &dst);
 }

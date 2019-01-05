@@ -79,3 +79,28 @@ pub fn Dir(filepath : &str) -> Option<String>
     s.pop();
     Some(format!("./{}", s.join("/")))
 }
+
+/// Normalize a path.
+/// The normalized path is like [../../../]folder/other_folder/file.ext
+/// will trim ./ in any opsition
+/// will trim ../ if it has a parent folder.
+pub fn NormPath(filepath : &str) -> Option<String>
+{
+    let mut s = Vec::new();
+    for obj in filepath.split('/').map(|x| x.to_string()).filter(|x| x != "")
+    {
+        match obj.as_str()
+        {
+            ".." =>
+            {
+                if s.is_empty() || s.last().unwrap() == ".." { s.push("..".to_owned()); }
+                else { s.pop(); }
+            },
+            "." => { }, // do nothing with current dir...
+            st => { s.push(st.to_owned()); }
+        }
+    }
+    if s.is_empty() { return Some("./".to_owned()); }
+    if s[0] != ".." { s.insert(0, ".".to_owned()); }
+    Some(s.join("/"))
+}
