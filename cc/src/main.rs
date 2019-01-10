@@ -21,7 +21,7 @@ struct Data
     output : Option<String>,
     include_dir : Option<String>,
     hint : Option<bool>,
-    ignore_trash : Option<bool>,
+    remove_comment : Option<bool>,
 }
 
 #[derive(Debug)]
@@ -42,8 +42,8 @@ fn Parse(mut args : VecDeque<String>, mut data : &mut Data, state : ParseState)
         {
             "-i" => Parse(args, &mut data, ParseState::SetInclude),
             "-o" => Parse(args, &mut data, ParseState::SetOutput),
-            "-h" => data.hint = Some(false),
-            "-g" => data.ignore_trash = Some(false),
+            "-u" => data.hint = Some(false),
+            "-m" => data.remove_comment = Some(false),
             _ =>
             {
                 if data.input != None { panic!("\ninput file re-defined!\n"); }
@@ -80,7 +80,7 @@ fn Unfold(
     mut predef : &mut Vec<String>,  // already unfolded file names.
     mut info : &mut Vec<String>,    // currently unfolding file names.
     hint : bool,                // whether output hints.
-    ignore : bool,              // whether ignore not matched lines in transfering blocks.
+    ingore_comment : bool,      // whether ignore comments.
 ) -> Vec<String>
 {
     let srcfile = NormPath(filename);
@@ -89,52 +89,37 @@ fn Unfold(
     info.push(srcfile.unwrap().to_owned());
     if info.len() > 32 { panic!("recursion too deep! with \n{}", info.join("\n")); }
     
-    let source = ReadAll(filename);
+    let mut source = ReadAll(filename);
     if source == None { panic!("Can not read from file [{}] from \n{}", filename, info.join("\n")); }
     
-    let re : Regex = Regex::new("^[ ]*#include[ ]*\"(.*)\"").unwrap();
+    if ingore_comment // will **not** trim comments **generated** inside.
+    {
+        let re_linecomm = Regex::new("//.*\n").unwrap();
+        let re_blockcomm = Regex::new("/\\*.*\\*/").unwrap();
+        source = Some(re_blockcomm.replace_all(&source.unwrap(), "").to_string());
+        source = Some(re_linecomm.replace_all(&source.unwrap(), "").to_string());
+    }
+    
+    let re_inc : Regex = Regex::new("^[ ]*#bruteforces[ ]*include[ ]*\"(.*)\"").unwrap();
     let src = source.unwrap().split('\n').map(|x| x.trim_right().to_string()).collect::<Vec<String>>();
     let mut dst = Vec::new();
-    let mut transfering = false;
     'nextline: for line in src
     {
-        match line.as_str()
+        for cap in re_inc.captures_iter(&line)
         {
-            "/* bruteforces generation begin */" =>
-            {
-                transfering = true;
-            }
-            
-            "/* bruteforces generation end */" =>
-            {
-                transfering = false;
-            }
-            
-            _ =>
-            {
-                if !transfering
-                {
-                    if line.len() != 0 { dst.push(line); }
-                    continue;
-                }
-                
-                for cap in re.captures_iter(&line)
-                {
-                    let incpath = NormPath(incdir);
-                    if incpath == None { panic!("include directroy [{}] invalid!", incdir); }
-                    let incfile = incpath.unwrap() + "/" + &cap[1];
-                    let mut unfolded = Unfold(&incfile, incdir, &mut predef, &mut info, hint, ignore);
-                    if predef.contains(&incfile.to_owned()) { break; }
-                    if hint { dst.push("// bruteforces >>> ".to_owned() + &incfile + " >>>"); }
-                    dst.append(&mut unfolded);
-                    if hint { dst.push("// <<< ".to_owned() + &incfile + " <<< bruteforces"); }
-                    predef.push(incfile);
-                    continue 'nextline; // only take the first capture of this line, if any.
-                }
-                
-                if !ignore { dst.push(line); }
-            }
+            let incpath = NormPath(incdir);
+            if incpath == None { panic!("include directroy [{}] invalid!", incdir); }
+            let incfile = incpath.unwrap() + "/" + &cap[1];
+            let mut unfolded = Unfold(&incfile, incdir, &mut predef, &mut info, hint, ingore_comment);
+            if predef.contains(&incfile.to_owned()) { break; }
+            if hint { dst.push("// bruteforces >>> ".to_owned() + &incfile + " >>>"); }
+            dst.append(&mut unfolded);
+            if hint { dst.push("// <<< ".to_owned() + &incfile + " <<< bruteforces"); }
+            predef.push(incfile);
+            continue 'nextline; // only take the first capture of this line, if any.
         }
+        
+        dst.push(line);
     }
     info.pop();
     dst
@@ -148,7 +133,7 @@ fn main()
         output : None,
         include_dir : None,
         hint : None,
-        ignore_trash : None,
+        remove_comment : None,
     };
     
     let mut args : VecDeque<String> = args().map(|x| x.to_string()).collect();
@@ -160,7 +145,7 @@ fn main()
     if data.include_dir == None { data.include_dir = Dir((&data).input.as_ref().unwrap()); }
     if data.include_dir == None { panic!("You must specify an include path while directory of input file is invalid."); }
     if data.hint == None { data.hint = Some(true); }
-    if data.ignore_trash == None { data.ignore_trash = Some(true); }
+    if data.remove_comment == None { data.remove_comment = Some(true); }
     
     let dst = Unfold(
         (&data).input.as_ref().unwrap(),
@@ -168,7 +153,7 @@ fn main()
         &mut Vec::new(),
         &mut Vec::new(),
         data.hint.unwrap(),
-        data.ignore_trash.unwrap()
+        data.remove_comment.unwrap(),
     ).join("\n");
     
     let output = data.output.unwrap();

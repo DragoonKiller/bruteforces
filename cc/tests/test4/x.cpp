@@ -1,7 +1,7 @@
-/* bruteforces generation begin */
-#include "1.hpp"
-#include "2.hpp"
-/* bruteforces generation end */
+#bruteforces include "1.hpp"
+#bruteforces include "2.hpp"
+
+// outer comments!
 
 int main()
 {

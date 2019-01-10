@@ -1,3 +1,1 @@
-/* bruteforces generation begin */
-#include "base.hpp"
-/* bruteforces generation end */
+#bruteforces include "base.hpp"

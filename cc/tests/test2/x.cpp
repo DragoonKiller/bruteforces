@@ -1,6 +1,4 @@
-/* bruteforces generation begin */
-#include "all.hpp"
-/* bruteforces generation end */
+#bruteforces include "all.hpp"
 
 int main()
 {
